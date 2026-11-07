@@ -220,6 +220,7 @@ main{max-width:860px;margin:0 auto;padding:24px 20px 80px}
 
 /* 背诵清单打印 */
 .p-sec{font-size:18px;margin:24px 0 12px;color:var(--red);padding-bottom:6px;border-bottom:2px solid var(--red)}
+.p-sub{font-size:15px;margin:16px 0 8px;color:#b3261e}
 .print-item{
   background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:10px;
   break-inside:avoid;page-break-inside:avoid;

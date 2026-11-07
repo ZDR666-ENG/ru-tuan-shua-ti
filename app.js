@@ -95,6 +95,7 @@ window.App = (() => {
     if (view === 'wrong') return renderWrong();
     if (view === 'plan') return renderPlan();
     if (view === 'print') return renderPrint();
+    if (view === 'sync') return renderSync();
   }
 
   // ---------- home ----------
@@ -149,7 +150,12 @@ window.App = (() => {
         <div class="card" onclick="App.go('print')">
           <span class="badge">可打印</span>
           <div class="icon">🖨️</div><h3>背诵清单</h3>
-          <p>简答/填空/判断答案速记</p><span class="tag">查看 →</span>
+          <p>考点速记 + 全题库答案速览</p><span class="tag">查看 →</span>
+        </div>
+        <div class="card" onclick="App.go('sync')">
+          <span class="badge">跨设备</span>
+          <div class="icon">💾</div><h3>数据同步</h3>
+          <p>导出/导入进度，手机电脑互通</p><span class="tag">使用 →</span>
         </div>
       </div>
       <div style="text-align:center;margin-top:22px">
@@ -695,27 +701,46 @@ window.App = (() => {
   function renderPrint() {
     let content = '';
 
-    content += `<h2 class="p-sec">四、简答题（共 ${QB.short.length} 题）</h2>`;
-    QB.short.forEach((it, i) => {
-      content += `<div class="print-item"><div class="p-q">${i + 1}. ${esc(it.q)}</div><div class="p-a">${esc(it.a).replace(/\n/g, '<br>')}</div></div>`;
+    content += `<h2 class="p-sec">核心考点速记（高频知识点）</h2>`;
+    QB.speed.forEach(g => {
+      content += `<h3 class="p-sub">${esc(g.cat)}</h3>`;
+      content += `<div class="print-item"><div class="p-a">${g.facts.map(f => '• ' + esc(f)).join('<br>')}</div></div>`;
     });
 
-    content += `<h2 class="p-sec">三、填空题·答案版（共 ${QB.fill.length} 题）</h2>`;
+    content += `<h2 class="p-sec">单选题答案速览（共 ${QB.single.length} 题）</h2>`;
+    QB.single.forEach((it, i) => {
+      const text = it.o[it.a.charCodeAt(0) - 65];
+      content += `<div class="print-item"><div class="p-q">${i + 1}. ${esc(it.q)}</div><div class="p-a"><span class="p-ans">答：${it.a}</span>　${esc(text)}</div></div>`;
+    });
+
+    content += `<h2 class="p-sec">多选题答案速览（共 ${QB.multi.length} 题）</h2>`;
+    QB.multi.forEach((it, i) => {
+      const ans = sortStr(it.a);
+      const texts = ans.split('').map(c => it.o[c.charCodeAt(0) - 65]).join('；');
+      content += `<div class="print-item"><div class="p-q">${i + 1}. ${esc(it.q)}</div><div class="p-a"><span class="p-ans">答：${ans.split('').join('')}</span>　${esc(texts)}</div></div>`;
+    });
+
+    content += `<h2 class="p-sec">判断题（共 ${QB.judge.length} 题）</h2>`;
+    QB.judge.forEach((it, i) => {
+      content += `<div class="print-item"><div class="p-q">${i + 1}. ${esc(it.q)}　<span class="p-ans">（${it.a ? '对' : '错'}）</span></div></div>`;
+    });
+
+    content += `<h2 class="p-sec">填空题·答案版（共 ${QB.fill.length} 题）</h2>`;
     QB.fill.forEach((it, i) => {
       let full = it.q;
       it.keys.forEach(k => full = full.replace('____', k));
       content += `<div class="print-item"><div class="p-q">${i + 1}. ${esc(full)}</div></div>`;
     });
 
-    content += `<h2 class="p-sec">二、判断题（共 ${QB.judge.length} 题）</h2>`;
-    QB.judge.forEach((it, i) => {
-      content += `<div class="print-item"><div class="p-q">${i + 1}. ${esc(it.q)}　<span class="p-ans">（${it.a ? '对' : '错'}）</span></div></div>`;
+    content += `<h2 class="p-sec">简答题（共 ${QB.short.length} 题）</h2>`;
+    QB.short.forEach((it, i) => {
+      content += `<div class="print-item"><div class="p-q">${i + 1}. ${esc(it.q)}</div><div class="p-a">${esc(it.a).replace(/\n/g, '<br>')}</div></div>`;
     });
 
     $().innerHTML = `
       <div class="section-head no-print">
         <h2>🖨️ 背诵清单</h2>
-        <span class="hint">含简答、填空、判断答案，可打印 / 存为 PDF / 复制文本</span>
+        <span class="hint">核心考点速记 + 单选/多选答案 + 判断/填空/简答，可打印 / 存为 PDF / 复制文本</span>
       </div>
       <div class="actions no-print" style="justify-content:flex-start;margin-bottom:16px">
         <button class="btn" onclick="window.print()">🖨️ 打印 / 存为 PDF</button>
@@ -727,12 +752,18 @@ window.App = (() => {
 
   function copyPrint() {
     let txt = '入团积极分子考试 · 背诵清单\n\n';
-    txt += '【简答题】\n';
-    QB.short.forEach((it, i) => txt += `${i + 1}. ${it.q}\n答：${it.a.replace(/\n/g, '\n   ')}\n\n`);
-    txt += '【填空题·答案版】\n';
-    QB.fill.forEach((it, i) => { let full = it.q; it.keys.forEach(k => full = full.replace('____', k)); txt += `${i + 1}. ${full}\n`; });
+    txt += '【核心考点速记】\n';
+    QB.speed.forEach(g => { txt += `\n◆ ${g.cat}\n`; g.facts.forEach(f => txt += `• ${f}\n`); });
+    txt += '\n【单选题答案速览】\n';
+    QB.single.forEach((it, i) => txt += `${i + 1}. ${it.q}\n   答：${it.a}　${it.o[it.a.charCodeAt(0) - 65]}\n`);
+    txt += '\n【多选题答案速览】\n';
+    QB.multi.forEach((it, i) => { const ans = sortStr(it.a); const texts = ans.split('').map(c => it.o[c.charCodeAt(0) - 65]).join('；'); txt += `${i + 1}. ${it.q}\n   答：${ans.split('').join('')}　${texts}\n`; });
     txt += '\n【判断题】\n';
     QB.judge.forEach((it, i) => txt += `${i + 1}. ${it.q}（${it.a ? '对' : '错'}）\n`);
+    txt += '\n【填空题·答案版】\n';
+    QB.fill.forEach((it, i) => { let full = it.q; it.keys.forEach(k => full = full.replace('____', k)); txt += `${i + 1}. ${full}\n`; });
+    txt += '\n【简答题】\n';
+    QB.short.forEach((it, i) => txt += `${i + 1}. ${it.q}\n答：${it.a.replace(/\n/g, '\n   ')}\n\n`);
     copyText(txt);
   }
 
@@ -747,6 +778,56 @@ window.App = (() => {
     document.body.appendChild(ta); ta.select();
     try { document.execCommand('copy'); alert('已复制到剪贴板'); } catch { prompt('复制失败，请手动复制：', s); }
     document.body.removeChild(ta);
+  }
+
+  // ---------- 数据同步（跨设备手动） ----------
+  function renderSync() {
+    $().innerHTML = `
+      <div class="section-head"><h2>💾 数据同步</h2></div>
+      <div class="setup">
+        <p style="font-size:14px;color:var(--muted);margin-bottom:14px;line-height:1.7">
+          把做题进度、错题本、打卡记录、目标导出一段「同步代码」，在另一台设备（手机/电脑）上粘贴导入，即可同步进度。<br>
+          说明：这是手动同步，无云端账号；如需全自动云同步（免复制），需要额外接入后端。
+        </p>
+        <label>① 导出本机数据</label>
+        <textarea id="syncOut" rows="5" style="width:100%;padding:12px;border:1.5px solid var(--line);border-radius:10px;font-size:12px;font-family:monospace" readonly placeholder="点击下方按钮生成同步代码"></textarea>
+        <div class="actions" style="justify-content:flex-start;margin-top:10px">
+          <button class="btn" onclick="App.exportData()">生成并复制代码</button>
+        </div>
+        <label style="margin-top:20px">② 导入到本机</label>
+        <textarea id="syncIn" rows="5" style="width:100%;padding:12px;border:1.5px solid var(--line);border-radius:10px;font-size:12px;font-family:monospace" placeholder="把另一台设备生成的代码粘贴到这里"></textarea>
+        <div class="actions" style="justify-content:flex-start;margin-top:10px">
+          <button class="btn secondary" onclick="App.importData()">导入并覆盖本机进度</button>
+        </div>
+      </div>
+      <div class="actions"><button class="btn ghost" onclick="App.go('home')">返回首页</button></div>`;
+  }
+
+  function exportData() {
+    const payload = { stats, wrong, daily, goal, v: 1 };
+    const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
+    const ta = document.getElementById('syncOut');
+    if (ta) ta.value = b64;
+    copyText(b64);
+  }
+
+  function importData() {
+    const b64 = document.getElementById('syncIn').value.trim();
+    if (!b64) { alert('请先粘贴同步代码'); return; }
+    try {
+      const json = decodeURIComponent(escape(atob(b64)));
+      const p = JSON.parse(json);
+      if (!p || typeof p !== 'object') throw new Error('bad');
+      Object.keys(stats).forEach(k => delete stats[k]);
+      Object.assign(stats, p.stats || {});
+      wrong = p.wrong || {};
+      Object.keys(daily).forEach(k => delete daily[k]);
+      Object.assign(daily, p.daily || {});
+      goal = +p.goal > 0 ? +p.goal : 50;
+      save(LS_STATS, stats); save(LS_WRONG, wrong); save(LS_DAILY, daily); save(LS_GOAL, goal);
+      alert('导入成功！进度已同步到本机。');
+      go('home');
+    } catch { alert('代码无效，请检查后重试'); }
   }
 
   // ---------- open (from home cards) ----------
@@ -784,6 +865,6 @@ window.App = (() => {
     pick, pickJudge, submit, nav, finishPractice,
     revealBlank, revealAllFill, hideFill, toggleShort,
     examSetup, examStart, examPick, examPickJudge, examNav, examGoto, examSubmit,
-    redo, clearWrong, clearAllWrong, resetAll, setGoal, copyPrint,
+    redo, clearWrong, clearAllWrong, resetAll, setGoal, copyPrint, exportData, importData,
   };
 })();
