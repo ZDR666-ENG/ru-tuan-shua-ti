@@ -193,6 +193,19 @@ main{max-width:860px;margin:0 auto;padding:24px 20px 80px}
 .empty{text-align:center;color:var(--muted);padding:60px 20px}
 .empty .big{font-size:40px;margin-bottom:10px}
 
+/* 收藏星标 */
+.star{
+  margin-left:auto;background:none;border:none;font-size:24px;line-height:1;
+  cursor:pointer;color:#c9ced4;padding:0 4px;transition:.15s;
+}
+.star:hover{transform:scale(1.15)}
+.star.on{color:var(--amber)}
+
+/* 学习报告：分题型正确率 */
+.type-row{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+.type-row .tname{flex:0 0 92px;font-size:14px;font-weight:600;white-space:nowrap}
+.type-row .tval{flex:0 0 auto;font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums;text-align:right;min-width:120px}
+
 .hidden{display:none!important}
 
 @media(max-width:600px){

@@ -5,13 +5,15 @@ window.App = (() => {
   const LS_WRONG = 'brs_wrong_v1';
   const LS_DAILY = 'brs_daily_v1';
   const LS_GOAL = 'brs_goal_v1';
+  const LS_FAV = 'brs_fav_v1';
+  const LS_EXAMS = 'brs_exams_v1';
 
   const META = {
-    single: { name: '单选题', icon: '🔘', count: QB.single.length, kind: 'choice' },
-    multi:  { name: '多选题', icon: '☑️', count: QB.multi.length,  kind: 'choice' },
-    judge:  { name: '判断题', icon: '⚖️', count: QB.judge.length,  kind: 'judge' },
-    fill:   { name: '填空题', icon: '✍️', count: QB.fill.length,   kind: 'fill' },
-    short:  { name: '简答题', icon: '📖', count: QB.short.length,  kind: 'short' },
+    single: { name: '单选题', icon: '🔘' },
+    multi:  { name: '多选题', icon: '☑️' },
+    judge:  { name: '判断题', icon: '⚖️' },
+    fill:   { name: '填空题', icon: '✍️' },
+    short:  { name: '简答题', icon: '📖' },
   };
 
   // ---------- storage ----------
@@ -21,6 +23,8 @@ window.App = (() => {
   let wrong = load(LS_WRONG, {});
   const daily = load(LS_DAILY, {});
   let goal = load(LS_GOAL, 50);
+  const fav = load(LS_FAV, {});
+  let exams = load(LS_EXAMS, []);
 
   function idOf(type, idx) { return type + '-' + idx; }
   function parseId(id) { const i = id.lastIndexOf('-'); return { type: id.slice(0, i), idx: +id.slice(i + 1) }; }
@@ -59,7 +63,7 @@ window.App = (() => {
   const sortStr = (s) => String(s).split('').sort().join('');
   const seq = (n) => Array.from({ length: n }, (_, i) => i);
 
-  // 打乱选项顺序，返回 { opts:[{v,text|label,emoji?}], correct }
+  // 打乱选项顺序
   function setupOpts(type, item) {
     if (type === 'judge') {
       return { opts: [{ v: true, label: '对', emoji: '✅' }, { v: false, label: '错', emoji: '❌' }], correct: item.a };
@@ -71,13 +75,19 @@ window.App = (() => {
     const correct = perm.map((origIdx, j) => ansIdx.includes(origIdx) ? String.fromCharCode(65 + j) : null).filter(Boolean).sort().join('');
     return { opts, correct };
   }
-
   function gradeAnswer(type, setup, sel) {
     if (type === 'judge') return sel === setup.correct;
     return sortStr(sel) === sortStr(setup.correct);
   }
   function correctText(type, setup) {
     return type === 'judge' ? (setup.correct ? '对（正确）' : '错（错误）') : setup.correct;
+  }
+  function answerTextOf(type, item) {
+    if (type === 'judge') return item.a ? '对（正确）' : '错（错误）';
+    if (type === 'multi') return sortStr(item.a).split('').join('');
+    if (type === 'fill') return item.keys.join('、');
+    if (type === 'short') return '见背诵模式';
+    return item.a;
   }
 
   // ---------- state ----------
@@ -86,7 +96,6 @@ window.App = (() => {
 
   function go(v) { view = v; render(); window.scrollTo(0, 0); }
 
-  // ---------- render ----------
   function render() {
     if (view === 'home') return renderHome();
     if (view === 'practice') return renderPractice();
@@ -96,6 +105,8 @@ window.App = (() => {
     if (view === 'plan') return renderPlan();
     if (view === 'print') return renderPrint();
     if (view === 'sync') return renderSync();
+    if (view === 'report') return renderReport();
+    if (view === 'fav') return renderFav();
   }
 
   // ---------- home ----------
@@ -104,6 +115,7 @@ window.App = (() => {
     const totalOk = Object.values(stats).reduce((n, s) => n + s.c, 0);
     const acc = totalDone ? Math.round((totalOk / totalDone) * 100) : 0;
     const wrongCount = Object.keys(wrong).length;
+    const favCount = Object.keys(fav).length;
     const streakDays = calcStreak();
 
     let cards = '';
@@ -111,7 +123,7 @@ window.App = (() => {
       const m = META[t];
       cards += `
         <div class="card" onclick="App.open('${t}')">
-          <span class="badge">${m.count} 题</span>
+          <span class="badge">${QB[t].length} 题</span>
           <div class="icon">${m.icon}</div>
           <h3>${m.name}</h3>
           <p>${descOf(t)}</p>
@@ -122,7 +134,7 @@ window.App = (() => {
     $().innerHTML = `
       <div class="hero">
         <h2>👋 开始刷题吧</h2>
-        <p>覆盖单选、多选、判断、填空、简答五大题型，题目与选项随机打乱，助你顺利通过入团考试。</p>
+        <p>题目与选项随机打乱，练习、模考、错题、打卡、背诵、同步一站搞定。</p>
         <div class="stats">
           <div class="stat"><b>${totalDone}</b><span>已作答</span></div>
           <div class="stat"><b>${acc}%</b><span>正确率</span></div>
@@ -133,28 +145,31 @@ window.App = (() => {
       <div class="grid">${cards}</div>
       <div class="grid" style="margin-top:14px">
         <div class="card" onclick="App.examSetup()">
-          <span class="badge">随机组卷</span>
-          <div class="icon">📝</div><h3>模拟考试</h3>
+          <span class="badge">随机组卷</span><div class="icon">📝</div><h3>模拟考试</h3>
           <p>限时答题，检验复习成果</p><span class="tag">开始 →</span>
         </div>
         <div class="card" onclick="App.go('wrong')">
-          <span class="badge">${wrongCount} 题</span>
-          <div class="icon">📌</div><h3>错题本</h3>
+          <span class="badge">${wrongCount} 题</span><div class="icon">📌</div><h3>错题本</h3>
           <p>集中攻克薄弱环节</p><span class="tag">复习 →</span>
         </div>
+        <div class="card" onclick="App.go('report')">
+          <span class="badge">分析</span><div class="icon">📊</div><h3>学习报告</h3>
+          <p>题型正确率 + 薄弱题排行</p><span class="tag">查看 →</span>
+        </div>
         <div class="card" onclick="App.go('plan')">
-          <span class="badge">连续 ${streakDays} 天</span>
-          <div class="icon">📅</div><h3>学习打卡</h3>
+          <span class="badge">连续 ${streakDays} 天</span><div class="icon">📅</div><h3>学习打卡</h3>
           <p>记录每日刷题，保持连续</p><span class="tag">查看 →</span>
         </div>
+        <div class="card" onclick="App.go('fav')">
+          <span class="badge">${favCount} 题</span><div class="icon">⭐</div><h3>我的收藏</h3>
+          <p>星标重点题，集中复习</p><span class="tag">查看 →</span>
+        </div>
         <div class="card" onclick="App.go('print')">
-          <span class="badge">可打印</span>
-          <div class="icon">🖨️</div><h3>背诵清单</h3>
+          <span class="badge">可打印</span><div class="icon">🖨️</div><h3>背诵清单</h3>
           <p>考点速记 + 全题库答案速览</p><span class="tag">查看 →</span>
         </div>
         <div class="card" onclick="App.go('sync')">
-          <span class="badge">跨设备</span>
-          <div class="icon">💾</div><h3>数据同步</h3>
+          <span class="badge">跨设备</span><div class="icon">💾</div><h3>数据同步</h3>
           <p>导出/导入进度，手机电脑互通</p><span class="tag">使用 →</span>
         </div>
       </div>
@@ -167,43 +182,42 @@ window.App = (() => {
     return { single: '四选一，每题一个正确答案', multi: '多选，漏选/错选均不得分', judge: '判断对错', fill: '挖空记忆，点击显示答案', short: '背诵简答要点' }[t];
   }
 
-  // ---------- practice (single/multi/judge) ----------
+  // ---------- practice（支持单一题型 / 混合题型） ----------
   function startPractice(type, shuffleOn = true) {
-    const n = QB[type].length;
-    const order = shuffleOn ? shuffle(seq(n)) : seq(n);
+    startRefs(QB[type].map((_, i) => ({ type, idx: i })), shuffleOn, `${META[type].name} · 练习模式`, () => startPractice(type));
+  }
+
+  function startRefs(refs, shuffleOn, title, again) {
+    const items = shuffleOn ? shuffle(refs) : refs.slice();
     const setups = {};
-    QB[type].forEach((item, i) => setups[i] = setupOpts(type, item));
-    state.prac = { type, order, idx: 0, answers: {}, setups, shuffle: shuffleOn };
+    refs.forEach(r => setups[idOf(r.type, r.idx)] = setupOpts(r.type, QB[r.type][r.idx]));
+    state.prac = { items, setups, answers: {}, idx: 0, tmpSel: undefined, title, again };
     view = 'practice';
     render();
     window.scrollTo(0, 0);
   }
 
-  function reshuffleOrder() {
-    const p = state.prac;
-    p.order = shuffle(seq(QB[p.type].length));
-    p.idx = 0;
-    render();
-    window.scrollTo(0, 0);
-  }
+  function reshuffleOrder() { state.prac.items = shuffle(state.prac.items); state.prac.idx = 0; render(); window.scrollTo(0, 0); }
   function sequentialOrder() {
-    const p = state.prac;
-    p.order = seq(QB[p.type].length);
-    p.idx = 0;
-    render();
-    window.scrollTo(0, 0);
+    state.prac.items = state.prac.items.slice().sort((a, b) => (a.type === b.type ? a.idx - b.idx : a.type.localeCompare(b.type)));
+    state.prac.idx = 0; render(); window.scrollTo(0, 0);
   }
 
   function renderPractice() {
     const p = state.prac;
-    const m = META[p.type];
-    const realIdx = p.order[p.idx];
-    const item = QB[p.type][realIdx];
-    const setup = p.setups[realIdx];
-    const rec = p.answers[realIdx];
+    if (!p.items.length) { $().innerHTML = `<div class="empty"><div class="big">🎉</div><p>没有可练习的题目</p><div class="actions"><button class="btn" onclick="App.go('home')">返回首页</button></div></div>`; return; }
+
+    const cur = p.items[p.idx];
+    const type = cur.type, idx = cur.idx;
+    const item = QB[type][idx];
+    const id = idOf(type, idx);
+    const setup = p.setups[id];
+    const rec = p.answers[id];
+    const m = META[type];
+    const starred = !!fav[id];
 
     let optsHtml;
-    if (p.type === 'judge') {
+    if (type === 'judge') {
       optsHtml = setup.opts.map(o => {
         const sel = rec ? rec.sel === o.v : p.tmpSel === o.v;
         let cls = 'opt';
@@ -215,7 +229,7 @@ window.App = (() => {
     } else {
       optsHtml = setup.opts.map(o => {
         let sel = false;
-        if (p.type === 'multi') sel = rec ? rec.sel.includes(o.v) : p.tmpSel?.has(o.v);
+        if (type === 'multi') sel = rec ? rec.sel.includes(o.v) : p.tmpSel?.has(o.v);
         else sel = rec ? rec.sel === o.v : p.tmpSel === o.v;
         let cls = 'opt';
         if (rec) {
@@ -230,18 +244,17 @@ window.App = (() => {
 
     let feedback = '';
     if (rec) {
-      const ok = rec.ok;
-      feedback = `<div class="feedback ${ok ? 'ok' : 'bad'}">
-        <b>${ok ? '✔ 回答正确' : '✘ 回答错误'}</b>
-        正确答案：<b>${correctText(p.type, setup)}</b></div>`;
+      feedback = `<div class="feedback ${rec.ok ? 'ok' : 'bad'}">
+        <b>${rec.ok ? '✔ 回答正确' : '✘ 回答错误'}</b>
+        正确答案：<b>${correctText(type, setup)}</b></div>`;
     }
 
-    const progress = Math.round((p.idx / p.order.length) * 100);
+    const progress = Math.round((p.idx / p.items.length) * 100);
 
     $().innerHTML = `
       <div class="section-head">
-        <h2>${m.icon} ${m.name} · 练习模式</h2>
-        <span class="hint">第 ${p.idx + 1} / ${p.order.length} 题</span>
+        <h2>${p.title}</h2>
+        <span class="hint">第 ${p.idx + 1} / ${p.items.length} 题</span>
       </div>
       <div class="actions" style="justify-content:flex-start;margin-bottom:14px">
         <button class="btn secondary" onclick="App.reshuffleOrder()">🔀 重新打乱</button>
@@ -252,7 +265,8 @@ window.App = (() => {
       <div class="qbox">
         <div class="qmeta">
           <span class="chip">${m.name}</span>
-          ${p.type === 'multi' ? '<span class="chip blue">多选题（多选）</span>' : ''}
+          ${type === 'multi' ? '<span class="chip blue">多选</span>' : ''}
+          <button class="star ${starred ? 'on' : ''}" onclick="App.toggleFav('${id}')" title="收藏">${starred ? '★' : '☆'}</button>
         </div>
         <div class="qtext">${p.idx + 1}. ${esc(item.q)}</div>
         <div class="opts">${optsHtml}</div>
@@ -261,7 +275,7 @@ window.App = (() => {
       <div class="actions">
         <button class="btn secondary" ${p.idx === 0 ? 'disabled' : ''} onclick="App.nav(-1)">← 上一题</button>
         ${rec ? '' : `<button class="btn" onclick="App.submit()">提交答案</button>`}
-        ${p.idx < p.order.length - 1 ? `<button class="btn outline" onclick="App.nav(1)">下一题 →</button>` : (rec ? `<button class="btn outline" onclick="App.finishPractice()">完成</button>` : '')}
+        ${p.idx < p.items.length - 1 ? `<button class="btn outline" onclick="App.nav(1)">下一题 →</button>` : (rec ? `<button class="btn outline" onclick="App.finishPractice()">完成</button>` : '')}
       </div>
       <div class="actions">
         <button class="btn ghost" onclick="App.go('home')">返回首页</button>
@@ -270,8 +284,8 @@ window.App = (() => {
 
   function pick(letter) {
     const p = state.prac;
-    if (p.answers[p.order[p.idx]]) return;
-    if (p.type === 'multi') {
+    if (p.answers[idOf(p.items[p.idx].type, p.items[p.idx].idx)]) return;
+    if (p.items[p.idx].type === 'multi') {
       p.tmpSel = p.tmpSel || new Set();
       p.tmpSel.has(letter) ? p.tmpSel.delete(letter) : p.tmpSel.add(letter);
     } else {
@@ -281,23 +295,24 @@ window.App = (() => {
   }
   function pickJudge(val) {
     const p = state.prac;
-    if (p.answers[p.order[p.idx]]) return;
+    if (p.answers[idOf(p.items[p.idx].type, p.items[p.idx].idx)]) return;
     p.tmpSel = val;
     renderPractice();
   }
 
   function submit() {
     const p = state.prac;
-    const realIdx = p.order[p.idx];
-    if (p.answers[realIdx]) return;
-    const setup = p.setups[realIdx];
+    const cur = p.items[p.idx];
+    const id = idOf(cur.type, cur.idx);
+    if (p.answers[id]) return;
+    const setup = p.setups[id];
     let sel;
-    if (p.type === 'multi') { sel = Array.from(p.tmpSel || []).sort().join(''); if (!sel) return; }
-    else if (p.type === 'judge') { if (p.tmpSel === undefined) return; sel = p.tmpSel; }
+    if (cur.type === 'multi') { sel = Array.from(p.tmpSel || []).sort().join(''); if (!sel) return; }
+    else if (cur.type === 'judge') { if (p.tmpSel === undefined) return; sel = p.tmpSel; }
     else { if (!p.tmpSel) return; sel = p.tmpSel; }
-    const ok = gradeAnswer(p.type, setup, sel);
-    p.answers[realIdx] = { sel, ok };
-    record(idOf(p.type, realIdx), ok);
+    const ok = gradeAnswer(cur.type, setup, sel);
+    p.answers[id] = { sel, ok };
+    record(id, ok);
     bumpDaily(ok);
     p.tmpSel = undefined;
     renderPractice();
@@ -305,7 +320,7 @@ window.App = (() => {
 
   function nav(d) {
     const p = state.prac;
-    p.idx = Math.max(0, Math.min(p.order.length - 1, p.idx + d));
+    p.idx = Math.max(0, Math.min(p.items.length - 1, p.idx + d));
     p.tmpSel = undefined;
     renderPractice();
     window.scrollTo(0, 0);
@@ -318,13 +333,58 @@ window.App = (() => {
     $().innerHTML = `
       <div class="result-card">
         <div class="score-ring">${done ? Math.round(ok / done * 100) : 0}%</div>
-        <div class="meta">本轮练习 · 共答 ${done} 题 · 答对 ${ok} 题 · 答错 ${done - ok} 题</div>
+        <div class="meta">本轮 · 共答 ${done} 题 · 答对 ${ok} 题 · 答错 ${done - ok} 题</div>
         <div class="actions">
-          <button class="btn" onclick="App.startPractice('${p.type}')">再练一轮（乱序）</button>
+          ${p.again ? `<button class="btn" onclick="App.resumePractice()">再练一轮（乱序）</button>` : ''}
           <button class="btn outline" onclick="App.go('home')">返回首页</button>
         </div>
       </div>`;
     window.scrollTo(0, 0);
+  }
+  function resumePractice() { state.prac.again(); }
+
+  // ---------- 收藏 ----------
+  function toggleFav(id) {
+    if (fav[id]) delete fav[id]; else fav[id] = true;
+    save(LS_FAV, fav);
+    if (view === 'practice') renderPractice();
+    else if (view === 'fav') renderFav();
+  }
+  function removeFav(id) { delete fav[id]; save(LS_FAV, fav); renderFav(); }
+
+  function renderFav() {
+    const ids = Object.keys(fav).filter(id => { const r = parseId(id); return QB[r.type] && QB[r.type][r.idx]; });
+    if (!ids.length) {
+      $().innerHTML = `<div class="empty"><div class="big">⭐</div><p>暂无收藏题目。刷题时点右上角 ☆ 即可收藏。</p><div class="actions"><button class="btn" onclick="App.go('home')">返回首页</button></div></div>`;
+      return;
+    }
+    const items = ids.map((id, n) => {
+      const { type, idx } = parseId(id);
+      const item = QB[type][idx];
+      return `<div class="witem">
+        <div class="qmeta"><span class="chip">${META[type].name}</span><span class="chip blue">#${n + 1}</span></div>
+        <div class="qtext" style="font-size:15px">${esc(item.q)}</div>
+        <div class="ans">正确答案：<b>${esc(answerTextOf(type, item))}</b></div>
+        <div class="actions" style="justify-content:flex-start;margin-top:12px">
+          <button class="btn" onclick="App.redo('${id}')">练习此题</button>
+          <button class="btn secondary" onclick="App.removeFav('${id}')">取消收藏</button>
+        </div>
+      </div>`;
+    }).join('');
+
+    $().innerHTML = `
+      <div class="section-head"><h2>⭐ 我的收藏</h2><span class="hint">共 ${ids.length} 题</span></div>
+      <div class="actions" style="justify-content:flex-start;margin-bottom:14px">
+        <button class="btn" onclick="App.practiceFav()">🔁 练习全部收藏</button>
+      </div>
+      ${items}
+      <div class="actions"><button class="btn ghost" onclick="App.go('home')">返回首页</button></div>`;
+  }
+
+  function practiceFav() {
+    const refs = Object.keys(fav).map(parseId).filter(r => QB[r.type] && QB[r.type][r.idx] && (r.type === 'single' || r.type === 'multi' || r.type === 'judge'));
+    if (!refs.length) { alert('收藏里没有可练习的选择/判断题'); return; }
+    startRefs(refs, true, '⭐ 收藏练习', practiceFav);
   }
 
   // ---------- memorize (fill / short) ----------
@@ -438,6 +498,7 @@ window.App = (() => {
     state.exam = {
       items: chosen, setups, answers: {}, submitted: false, idx: 0,
       minutes, secondsLeft: minutes * 60, timer: null,
+      typeLabel: type === 'mixed' ? '混合' : META[type].name, saved: false,
     };
     view = 'exam';
     render();
@@ -484,8 +545,6 @@ window.App = (() => {
     }
 
     const answeredCount = Object.keys(e.answers).length;
-    const typeName = META[cur.t].name;
-
     let palette = e.items.map((_, i) => {
       const done = e.answers[i] !== undefined;
       return `<button class="btn ${done ? 'outline' : 'secondary'}" style="padding:6px 10px;font-size:12px" onclick="App.examGoto(${i})">${i + 1}</button>`;
@@ -500,7 +559,7 @@ window.App = (() => {
       <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">${palette}</div>
       <div class="qbox">
         <div class="qmeta">
-          <span class="chip">${typeName}</span>
+          <span class="chip">${META[cur.t].name}</span>
           <span class="chip blue">第 ${e.idx + 1} / ${e.items.length} 题</span>
           ${cur.t === 'multi' ? '<span class="chip blue">多选</span>' : ''}
         </div>
@@ -564,6 +623,13 @@ window.App = (() => {
       </div>`;
     }).join('');
 
+    if (!e.saved) {
+      exams.push({ date: dateKey(new Date()), type: e.typeLabel || '练习', total, ok });
+      if (exams.length > 50) exams.splice(0, exams.length - 50);
+      save(LS_EXAMS, exams);
+      e.saved = true;
+    }
+
     const pct = total ? Math.round(ok / total * 100) : 0;
     const pass = pct >= 60;
 
@@ -590,16 +656,10 @@ window.App = (() => {
       const { type, idx } = parseId(id);
       const item = QB[type]?.[idx];
       if (!item) return null;
-      let ansText;
-      if (type === 'judge') ansText = item.a ? '对（正确）' : '错（错误）';
-      else if (type === 'multi') ansText = sortStr(item.a).split('').join('');
-      else if (type === 'fill') ansText = item.keys.join('、');
-      else if (type === 'short') ansText = '见背诵模式';
-      else ansText = item.a;
       return `<div class="witem">
         <div class="qmeta"><span class="chip">${META[type].name}</span><span class="chip blue">#${n + 1}</span></div>
         <div class="qtext" style="font-size:15px">${esc(item.q)}</div>
-        <div class="ans">正确答案：<b>${esc(ansText)}</b></div>
+        <div class="ans">正确答案：<b>${esc(answerTextOf(type, item))}</b></div>
         <div class="actions" style="justify-content:flex-start;margin-top:12px">
           <button class="btn" onclick="App.redo('${id}')">重做此题</button>
           <button class="btn secondary" onclick="App.clearWrong('${id}')">已掌握，移除</button>
@@ -609,18 +669,24 @@ window.App = (() => {
 
     $().innerHTML = `
       <div class="section-head"><h2>📌 错题本</h2><span class="hint">共 ${ids.length} 题</span></div>
-      ${items}
-      <div class="actions">
+      <div class="actions" style="justify-content:flex-start;margin-bottom:14px">
+        <button class="btn" onclick="App.practiceWrong()">🔁 错题重练</button>
         <button class="btn secondary" onclick="App.clearAllWrong()">清空错题本</button>
-        <button class="btn ghost" onclick="App.go('home')">返回首页</button>
-      </div>`;
+      </div>
+      ${items}
+      <div class="actions"><button class="btn ghost" onclick="App.go('home')">返回首页</button></div>`;
+  }
+
+  function practiceWrong() {
+    const refs = Object.keys(wrong).map(parseId).filter(r => r.type === 'single' || r.type === 'multi' || r.type === 'judge');
+    if (!refs.length) { alert('暂无可重练的选择/判断题'); return; }
+    startRefs(refs, true, '📌 错题重练', practiceWrong);
   }
 
   function redo(id) {
     const { type, idx } = parseId(id);
     if (type === 'single' || type === 'multi' || type === 'judge') {
-      state.prac = { type, order: [idx], idx: 0, answers: {}, setups: { [idx]: setupOpts(type, QB[type][idx]) }, shuffle: false };
-      view = 'practice'; render();
+      startRefs([{ type, idx }], false, `${META[type].name} · 单题练习`, null);
     } else {
       state.mem = { type, order: [idx], shuffled: false, reveal: {} };
       view = 'memorize'; render();
@@ -631,15 +697,77 @@ window.App = (() => {
   function clearWrong(id) { delete wrong[id]; save(LS_WRONG, wrong); if (view === 'wrong') render(); }
   function clearAllWrong() { wrong = {}; save(LS_WRONG, wrong); if (view === 'wrong') render(); }
 
-  function resetAll() {
-    if (!confirm('确定要清空全部做题记录和错题本吗？')) return;
-    localStorage.removeItem(LS_STATS);
-    localStorage.removeItem(LS_WRONG);
-    localStorage.removeItem(LS_DAILY);
-    Object.keys(stats).forEach(k => delete stats[k]);
-    Object.keys(daily).forEach(k => delete daily[k]);
-    wrong = {};
-    render();
+  // ---------- 学习报告 ----------
+  function renderReport() {
+    const totalDone = Object.values(stats).reduce((n, s) => n + s.t, 0);
+    const totalOk = Object.values(stats).reduce((n, s) => n + s.c, 0);
+    const acc = totalDone ? Math.round((totalOk / totalDone) * 100) : 0;
+
+    const typeStats = {};
+    for (const t of Object.keys(META)) typeStats[t] = { t: 0, c: 0 };
+    for (const [id, s] of Object.entries(stats)) {
+      const { type } = parseId(id);
+      if (typeStats[type]) { typeStats[type].t += s.t; typeStats[type].c += s.c; }
+    }
+
+    const typeRows = Object.keys(META).map(t => {
+      const s = typeStats[t];
+      const pct = s.t ? Math.round(s.c / s.t * 100) : null;
+      return `<div class="type-row">
+        <span class="tname">${META[t].icon} ${META[t].name}</span>
+        <div class="pbar" style="flex:1"><div style="width:${pct === null ? 0 : pct}%"></div></div>
+        <span class="tval">${pct === null ? '未作答' : pct + '%（' + s.c + '/' + s.t + '）'}</span>
+      </div>`;
+    }).join('');
+
+    const weakest = Object.entries(stats)
+      .filter(([id, s]) => s.t > s.c)
+      .sort((a, b) => (b[1].t - b[1].c) - (a[1].t - a[1].c))
+      .slice(0, 10)
+      .map(([id, s]) => {
+        const { type, idx } = parseId(id);
+        const item = QB[type]?.[idx];
+        if (!item) return null;
+        return `<div class="witem" style="padding:12px 14px">
+          <div class="qmeta"><span class="chip">${META[type].name}</span><span class="stamp bad">错 ${s.t - s.c} 次</span></div>
+          <div class="qtext" style="font-size:14px">${esc(item.q)}</div>
+          <div class="actions" style="justify-content:flex-start;margin-top:8px">
+            <button class="btn" style="padding:6px 12px;font-size:13px" onclick="App.redo('${id}')">重做</button>
+          </div>
+        </div>`;
+      }).filter(Boolean).join('') || '<p style="color:var(--muted)">暂无错题记录，继续保持！</p>';
+
+    const examsHtml = exams.slice().reverse().map(e => {
+      const pct = e.total ? Math.round(e.ok / e.total * 100) : 0;
+      return `<div class="witem" style="padding:10px 14px;margin-bottom:8px">
+        <div class="qmeta"><span class="chip">${esc(e.type)}</span><span class="chip blue">${e.date}</span><span class="stamp ${pct >= 60 ? 'ok' : 'bad'}">${pct} 分</span></div>
+        <div style="font-size:13px;color:var(--muted)">答对 ${e.ok} / ${e.total} 题</div>
+      </div>`;
+    }).join('') || '<p style="color:var(--muted)">暂无考试记录</p>';
+
+    $().innerHTML = `
+      <div class="section-head"><h2>📊 学习报告</h2></div>
+      <div class="hero">
+        <div class="stats">
+          <div class="stat"><b>${totalDone}</b><span>总作答</span></div>
+          <div class="stat"><b>${acc}%</b><span>总正确率</span></div>
+          <div class="stat"><b>${Object.keys(wrong).length}</b><span>当前错题</span></div>
+          <div class="stat"><b>${Object.keys(fav).length}</b><span>收藏题目</span></div>
+        </div>
+      </div>
+      <div class="setup" style="margin-top:16px">
+        <h3 style="margin-bottom:12px">分题型正确率</h3>
+        ${typeRows}
+      </div>
+      <div class="setup" style="margin-top:16px">
+        <h3 style="margin-bottom:12px">最薄弱题目 TOP10</h3>
+        ${weakest}
+      </div>
+      <div class="setup" style="margin-top:16px">
+        <h3 style="margin-bottom:12px">最近考试成绩</h3>
+        ${examsHtml}
+      </div>
+      <div class="actions"><button class="btn ghost" onclick="App.go('home')">返回首页</button></div>`;
   }
 
   // ---------- 学习打卡 / 学习计划 ----------
@@ -786,7 +914,7 @@ window.App = (() => {
       <div class="section-head"><h2>💾 数据同步</h2></div>
       <div class="setup">
         <p style="font-size:14px;color:var(--muted);margin-bottom:14px;line-height:1.7">
-          把做题进度、错题本、打卡记录、目标导出一段「同步代码」，在另一台设备（手机/电脑）上粘贴导入，即可同步进度。<br>
+          把做题进度、错题本、打卡记录、目标、收藏、考试记录导出一段「同步代码」，在另一台设备（手机/电脑）上粘贴导入，即可同步进度。<br>
           说明：这是手动同步，无云端账号；如需全自动云同步（免复制），需要额外接入后端。
         </p>
         <label>① 导出本机数据</label>
@@ -804,7 +932,7 @@ window.App = (() => {
   }
 
   function exportData() {
-    const payload = { stats, wrong, daily, goal, v: 1 };
+    const payload = { stats, wrong, daily, goal, fav, exams, v: 2 };
     const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
     const ta = document.getElementById('syncOut');
     if (ta) ta.value = b64;
@@ -824,7 +952,10 @@ window.App = (() => {
       Object.keys(daily).forEach(k => delete daily[k]);
       Object.assign(daily, p.daily || {});
       goal = +p.goal > 0 ? +p.goal : 50;
-      save(LS_STATS, stats); save(LS_WRONG, wrong); save(LS_DAILY, daily); save(LS_GOAL, goal);
+      Object.keys(fav).forEach(k => delete fav[k]);
+      Object.assign(fav, p.fav || {});
+      exams = Array.isArray(p.exams) ? p.exams : [];
+      save(LS_STATS, stats); save(LS_WRONG, wrong); save(LS_DAILY, daily); save(LS_GOAL, goal); save(LS_FAV, fav); save(LS_EXAMS, exams);
       alert('导入成功！进度已同步到本机。');
       go('home');
     } catch { alert('代码无效，请检查后重试'); }
@@ -836,6 +967,16 @@ window.App = (() => {
     return startMemorize(type);
   }
 
+  function resetAll() {
+    if (!confirm('确定要清空全部做题记录、错题本、打卡、收藏吗？')) return;
+    [LS_STATS, LS_WRONG, LS_DAILY, LS_FAV, LS_EXAMS].forEach(k => localStorage.removeItem(k));
+    Object.keys(stats).forEach(k => delete stats[k]);
+    Object.keys(daily).forEach(k => delete daily[k]);
+    Object.keys(fav).forEach(k => delete fav[k]);
+    wrong = {}; exams = [];
+    render();
+  }
+
   // ---------- event delegation for blanks ----------
   document.addEventListener('click', (e) => {
     const b = e.target.closest('.blank');
@@ -843,13 +984,13 @@ window.App = (() => {
   });
 
   document.addEventListener('keydown', (e) => {
-    if (view === 'practice' && state.prac) {
+    if (view === 'practice' && state.prac && state.prac.items.length) {
       const p = state.prac;
-      const realIdx = p.order[p.idx];
-      const setup = p.setups[realIdx];
+      const cur = p.items[p.idx];
+      const setup = p.setups[idOf(cur.type, cur.idx)];
       const n = setup.opts.length;
       if (e.key >= '1' && e.key <= String(n)) {
-        if (p.type === 'judge') pickJudge(e.key === '1');
+        if (cur.type === 'judge') pickJudge(e.key === '1');
         else pick(setup.opts[+e.key - 1].v);
       } else if (e.key === 'Enter') { submit(); }
       else if (e.key === 'ArrowLeft') { nav(-1); }
@@ -862,9 +1003,11 @@ window.App = (() => {
 
   return {
     go, open, startPractice, startMemorize, reshuffleOrder, sequentialOrder, shuffleMem, seqMem,
-    pick, pickJudge, submit, nav, finishPractice,
+    pick, pickJudge, submit, nav, finishPractice, resumePractice,
+    toggleFav, removeFav, practiceFav,
     revealBlank, revealAllFill, hideFill, toggleShort,
     examSetup, examStart, examPick, examPickJudge, examNav, examGoto, examSubmit,
-    redo, clearWrong, clearAllWrong, resetAll, setGoal, copyPrint, exportData, importData,
+    practiceWrong, redo, clearWrong, clearAllWrong, resetAll,
+    setGoal, copyPrint, exportData, importData,
   };
 })();
