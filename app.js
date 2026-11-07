@@ -3,6 +3,8 @@ window.App = (() => {
   const $ = () => document.getElementById('app');
   const LS_STATS = 'brs_stats_v1';
   const LS_WRONG = 'brs_wrong_v1';
+  const LS_DAILY = 'brs_daily_v1';
+  const LS_GOAL = 'brs_goal_v1';
 
   const META = {
     single: { name: '单选题', icon: '🔘', count: QB.single.length, kind: 'choice' },
@@ -17,6 +19,8 @@ window.App = (() => {
   const save = (k, v) => localStorage.setItem(k, JSON.stringify(v));
   const stats = load(LS_STATS, {});
   let wrong = load(LS_WRONG, {});
+  const daily = load(LS_DAILY, {});
+  let goal = load(LS_GOAL, 50);
 
   function idOf(type, idx) { return type + '-' + idx; }
   function parseId(id) { const i = id.lastIndexOf('-'); return { type: id.slice(0, i), idx: +id.slice(i + 1) }; }
@@ -26,6 +30,26 @@ window.App = (() => {
     s.t += 1; if (ok) s.c += 1; stats[id] = s; save(LS_STATS, stats);
     if (ok) { delete wrong[id]; } else { wrong[id] = true; }
     save(LS_WRONG, wrong);
+  }
+
+  // ---------- 每日打卡 ----------
+  function dateKey(d) {
+    const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, '0'), day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+  const todayKey = () => dateKey(new Date());
+  function bumpDaily(ok) {
+    const k = todayKey();
+    const d = daily[k] || { a: 0, c: 0 };
+    d.a += 1; if (ok) d.c += 1;
+    daily[k] = d; save(LS_DAILY, daily);
+  }
+  function calcStreak() {
+    let streak = 0;
+    let cur = new Date(); cur.setHours(0, 0, 0, 0);
+    if (!daily[dateKey(cur)]) cur = new Date(cur.getTime() - 86400000);
+    while (daily[dateKey(cur)]) { streak++; cur = new Date(cur.getTime() - 86400000); }
+    return streak;
   }
 
   // ---------- utils ----------
@@ -69,6 +93,8 @@ window.App = (() => {
     if (view === 'memorize') return renderMemorize();
     if (view === 'exam') return renderExam();
     if (view === 'wrong') return renderWrong();
+    if (view === 'plan') return renderPlan();
+    if (view === 'print') return renderPrint();
   }
 
   // ---------- home ----------
@@ -77,6 +103,7 @@ window.App = (() => {
     const totalOk = Object.values(stats).reduce((n, s) => n + s.c, 0);
     const acc = totalDone ? Math.round((totalOk / totalDone) * 100) : 0;
     const wrongCount = Object.keys(wrong).length;
+    const streakDays = calcStreak();
 
     let cards = '';
     for (const t of ['single', 'multi', 'judge', 'fill', 'short']) {
@@ -113,6 +140,16 @@ window.App = (() => {
           <span class="badge">${wrongCount} 题</span>
           <div class="icon">📌</div><h3>错题本</h3>
           <p>集中攻克薄弱环节</p><span class="tag">复习 →</span>
+        </div>
+        <div class="card" onclick="App.go('plan')">
+          <span class="badge">连续 ${streakDays} 天</span>
+          <div class="icon">📅</div><h3>学习打卡</h3>
+          <p>记录每日刷题，保持连续</p><span class="tag">查看 →</span>
+        </div>
+        <div class="card" onclick="App.go('print')">
+          <span class="badge">可打印</span>
+          <div class="icon">🖨️</div><h3>背诵清单</h3>
+          <p>简答/填空/判断答案速记</p><span class="tag">查看 →</span>
         </div>
       </div>
       <div style="text-align:center;margin-top:22px">
@@ -255,6 +292,7 @@ window.App = (() => {
     const ok = gradeAnswer(p.type, setup, sel);
     p.answers[realIdx] = { sel, ok };
     record(idOf(p.type, realIdx), ok);
+    bumpDaily(ok);
     p.tmpSel = undefined;
     renderPractice();
   }
@@ -506,6 +544,7 @@ window.App = (() => {
       const isOk = gradeAnswer(cur.t, setup, sel);
       if (isOk) ok++;
       record(idOf(cur.t, cur.i), isOk);
+      if (sel !== undefined) bumpDaily(isOk);
 
       let yourText;
       if (cur.t === 'judge') yourText = sel === undefined ? '未作答' : (sel ? '对' : '错');
@@ -590,9 +629,124 @@ window.App = (() => {
     if (!confirm('确定要清空全部做题记录和错题本吗？')) return;
     localStorage.removeItem(LS_STATS);
     localStorage.removeItem(LS_WRONG);
+    localStorage.removeItem(LS_DAILY);
     Object.keys(stats).forEach(k => delete stats[k]);
+    Object.keys(daily).forEach(k => delete daily[k]);
     wrong = {};
     render();
+  }
+
+  // ---------- 学习打卡 / 学习计划 ----------
+  function renderPlan() {
+    const streak = calcStreak();
+    const totalDays = Object.keys(daily).filter(k => daily[k] && daily[k].a > 0).length;
+    const tk = todayKey();
+    const todayA = daily[tk]?.a || 0;
+    const todayC = daily[tk]?.c || 0;
+
+    let cells = '';
+    for (let i = 13; i >= 0; i--) {
+      const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - i);
+      const a = daily[dateKey(d)]?.a || 0;
+      let cls = 'cal-day empty';
+      if (a >= goal) cls = 'cal-day full';
+      else if (a > 0) cls = 'cal-day partial';
+      cells += `<div class="cal"><div class="${cls}">${d.getDate()}</div><div class="cal-n">${a}</div></div>`;
+    }
+
+    $().innerHTML = `
+      <div class="section-head"><h2>📅 学习打卡</h2></div>
+      <div class="hero">
+        <div class="stats">
+          <div class="stat"><b>${streak}</b><span>连续打卡(天)</span></div>
+          <div class="stat"><b>${totalDays}</b><span>累计打卡(天)</span></div>
+          <div class="stat"><b>${todayA}</b><span>今日已刷题</span></div>
+          <div class="stat"><b>${todayA ? Math.round(todayC / todayA * 100) : 0}%</b><span>今日正确率</span></div>
+        </div>
+        <div style="margin-top:16px">
+          <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--muted);margin-bottom:6px">
+            <span>今日目标</span><span>${todayA} / ${goal} 题</span>
+          </div>
+          <div class="pbar"><div style="width:${Math.min(100, Math.round(todayA / goal * 100))}%"></div></div>
+        </div>
+        <div class="actions" style="justify-content:flex-start;margin-top:16px">
+          <input type="number" id="goalInput" value="${goal}" min="5" max="500" style="width:120px;padding:10px;border:1.5px solid var(--line);border-radius:10px;font-size:15px">
+          <button class="btn secondary" onclick="App.setGoal()">设置每日目标</button>
+        </div>
+      </div>
+      <div class="setup" style="margin-top:16px">
+        <h3 style="margin-bottom:12px">最近 14 天</h3>
+        <div class="cal-row">${cells}</div>
+        <div class="cal-legend">
+          <span><i class="dot full"></i>达成目标</span>
+          <span><i class="dot partial"></i>已刷题</span>
+          <span><i class="dot empty"></i>未打卡</span>
+        </div>
+      </div>
+      <div class="actions"><button class="btn ghost" onclick="App.go('home')">返回首页</button></div>`;
+  }
+
+  function setGoal() {
+    const v = +document.getElementById('goalInput').value;
+    if (v > 0) { goal = v; save(LS_GOAL, goal); renderPlan(); }
+  }
+
+  // ---------- 背诵清单（打印） ----------
+  function renderPrint() {
+    let content = '';
+
+    content += `<h2 class="p-sec">四、简答题（共 ${QB.short.length} 题）</h2>`;
+    QB.short.forEach((it, i) => {
+      content += `<div class="print-item"><div class="p-q">${i + 1}. ${esc(it.q)}</div><div class="p-a">${esc(it.a).replace(/\n/g, '<br>')}</div></div>`;
+    });
+
+    content += `<h2 class="p-sec">三、填空题·答案版（共 ${QB.fill.length} 题）</h2>`;
+    QB.fill.forEach((it, i) => {
+      let full = it.q;
+      it.keys.forEach(k => full = full.replace('____', k));
+      content += `<div class="print-item"><div class="p-q">${i + 1}. ${esc(full)}</div></div>`;
+    });
+
+    content += `<h2 class="p-sec">二、判断题（共 ${QB.judge.length} 题）</h2>`;
+    QB.judge.forEach((it, i) => {
+      content += `<div class="print-item"><div class="p-q">${i + 1}. ${esc(it.q)}　<span class="p-ans">（${it.a ? '对' : '错'}）</span></div></div>`;
+    });
+
+    $().innerHTML = `
+      <div class="section-head no-print">
+        <h2>🖨️ 背诵清单</h2>
+        <span class="hint">含简答、填空、判断答案，可打印 / 存为 PDF / 复制文本</span>
+      </div>
+      <div class="actions no-print" style="justify-content:flex-start;margin-bottom:16px">
+        <button class="btn" onclick="window.print()">🖨️ 打印 / 存为 PDF</button>
+        <button class="btn secondary" onclick="App.copyPrint()">📋 复制为纯文本</button>
+        <button class="btn ghost" onclick="App.go('home')">返回首页</button>
+      </div>
+      <div id="printRoot">${content}</div>`;
+  }
+
+  function copyPrint() {
+    let txt = '入团积极分子考试 · 背诵清单\n\n';
+    txt += '【简答题】\n';
+    QB.short.forEach((it, i) => txt += `${i + 1}. ${it.q}\n答：${it.a.replace(/\n/g, '\n   ')}\n\n`);
+    txt += '【填空题·答案版】\n';
+    QB.fill.forEach((it, i) => { let full = it.q; it.keys.forEach(k => full = full.replace('____', k)); txt += `${i + 1}. ${full}\n`; });
+    txt += '\n【判断题】\n';
+    QB.judge.forEach((it, i) => txt += `${i + 1}. ${it.q}（${it.a ? '对' : '错'}）\n`);
+    copyText(txt);
+  }
+
+  function copyText(s) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(s).then(() => alert('已复制到剪贴板'), () => fallbackCopy(s));
+    } else fallbackCopy(s);
+  }
+  function fallbackCopy(s) {
+    const ta = document.createElement('textarea');
+    ta.value = s; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); alert('已复制到剪贴板'); } catch { prompt('复制失败，请手动复制：', s); }
+    document.body.removeChild(ta);
   }
 
   // ---------- open (from home cards) ----------
@@ -630,6 +784,6 @@ window.App = (() => {
     pick, pickJudge, submit, nav, finishPractice,
     revealBlank, revealAllFill, hideFill, toggleShort,
     examSetup, examStart, examPick, examPickJudge, examNav, examGoto, examSubmit,
-    redo, clearWrong, clearAllWrong, resetAll,
+    redo, clearWrong, clearAllWrong, resetAll, setGoal, copyPrint,
   };
 })();
